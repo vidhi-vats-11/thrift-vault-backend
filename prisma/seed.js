@@ -63,10 +63,14 @@ const seedProducts = async (categories) => {
   const bySeed = new Map()
 
   for (const item of PRODUCTS) {
-    const images = IMAGE_ANGLES.map((angle, sortOrder) => ({
-      url: `https://picsum.photos/seed/${item.seed}${angle}/900/1125`,
-      sortOrder,
-    }))
+    // Real photographs, stored in our own Blob bucket. Listings that do not have
+    // a shot yet fall back to the generated placeholder so the grid never renders
+    // an empty card.
+    const images = (
+      item.images?.length
+        ? item.images
+        : IMAGE_ANGLES.map((angle) => `https://picsum.photos/seed/${item.seed}${angle}/900/1125`)
+    ).map((url, sortOrder) => ({ url, sortOrder }))
 
     const fields = {
       name: item.name,
