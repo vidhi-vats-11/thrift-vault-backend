@@ -1,0 +1,56 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: thrift
+      POSTGRES_PASSWORD: thrift
+      POSTGRES_DB: thriftvault
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U thrift -d thriftvault"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # This compose file is the local-testing stack, so the dev-only webhook
+      # signing helper at /payments/mock/sign stays reachable. Deploy the image
+      # itself with NODE_ENV=production, which the Dockerfile already defaults to.
+      NODE_ENV: development
+      PORT: 4000
+      DATABASE_URL: postgresql://thrift:thrift@postgres:5432/thriftvault
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_SECRET: dev_access_secret_change_me
+      JWT_REFRESH_SECRET: dev_refresh_secret_change_me
+      PAYMENT_WEBHOOK_SECRET: dev_webhook_secret
+      CORS_ORIGINS: http://localhost:5173,http://localhost:4173
+      ORDER_HOLD_MINUTES: 15
+    ports:
+      - "4000:4000"
+    volumes:
+      - uploads:/app/uploads
+    command: sh -c "npx prisma migrate deploy && node prisma/seed.js && node src/server.js"
+
+volumes:
+  pgdata:
+  uploads:

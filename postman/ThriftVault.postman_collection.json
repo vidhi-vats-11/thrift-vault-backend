@@ -1,0 +1,1114 @@
+{
+  "info": {
+    "name": "Thrift Vault API (v1)",
+    "description": "Local testing collection for the Thrift Vault backend.\n\n**Quick start**\n1. Import this collection and `ThriftVault.postman_environment.json`.\n2. Select the \"Thrift Vault — Local\" environment.\n3. Run the folders top to bottom, or use the Collection Runner.\n\nTokens, product ids and order ids are captured into environment variables automatically by the test scripts, so no manual copy-pasting is needed.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [{ "key": "baseUrl", "value": "http://localhost:4000/api/v1" }],
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+  },
+  "item": [
+    {
+      "name": "00 — Health",
+      "item": [
+        {
+          "name": "Health check",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "url": { "raw": "http://localhost:4000/health", "protocol": "http", "host": ["localhost"], "port": "4000", "path": ["health"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('API is up', () => pm.response.to.have.status(200));",
+                  "pm.test('status ok', () => pm.expect(pm.response.json().status).to.eql('ok'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "01 — Auth",
+      "item": [
+        {
+          "name": "Signup",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{newUserEmail}}\",\n  \"password\": \"Password123!\",\n  \"name\": \"Postman Shopper\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/auth/signup", "host": ["{{baseUrl}}"], "path": ["auth", "signup"] }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Fresh email each run so signup never collides with a previous run.",
+                  "pm.environment.set('newUserEmail', `postman+${Date.now()}@thriftvault.test`);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 created', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.environment.set('accessToken', b.accessToken);",
+                  "pm.environment.set('refreshToken', b.refreshToken);",
+                  "pm.test('returns tokens', () => pm.expect(b.accessToken).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login (seeded shopper)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"shopper@thriftvault.test\",\n  \"password\": \"Password123!\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/auth/login", "host": ["{{baseUrl}}"], "path": ["auth", "login"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 ok', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.environment.set('accessToken', b.accessToken);",
+                  "pm.environment.set('refreshToken', b.refreshToken);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login (seeded admin)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@thriftvault.test\",\n  \"password\": \"Password123!\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/auth/login", "host": ["{{baseUrl}}"], "path": ["auth", "login"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 ok', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.environment.set('adminToken', b.accessToken);",
+                  "pm.test('is admin', () => pm.expect(b.user.role).to.eql('admin'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login — wrong password (401)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"shopper@thriftvault.test\",\n  \"password\": \"wrong-password\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/auth/login", "host": ["{{baseUrl}}"], "path": ["auth", "login"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('rejected with 401', () => pm.response.to.have.status(401));"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Current user (/me)",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/auth/me", "host": ["{{baseUrl}}"], "path": ["auth", "me"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": ["pm.test('200 ok', () => pm.response.to.have.status(200));"] }
+            }
+          ]
+        },
+        {
+          "name": "Refresh token",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}" },
+            "url": { "raw": "{{baseUrl}}/auth/refresh", "host": ["{{baseUrl}}"], "path": ["auth", "refresh"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 ok', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.environment.set('accessToken', b.accessToken);",
+                  "// Refresh tokens rotate: the old one is burned, so store the new one.",
+                  "pm.environment.set('refreshToken', b.refreshToken);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}" },
+            "url": { "raw": "{{baseUrl}}/auth/logout", "host": ["{{baseUrl}}"], "path": ["auth", "logout"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": ["pm.test('204 no content', () => pm.response.to.have.status(204));"] }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 — Catalog (public)",
+      "item": [
+        {
+          "name": "List products",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/products?page=1&limit=12&sort=newest",
+              "host": ["{{baseUrl}}"],
+              "path": ["products"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "12" },
+                { "key": "sort", "value": "newest" },
+                { "key": "category", "value": "Jackets", "disabled": true },
+                { "key": "q", "value": "denim", "disabled": true },
+                { "key": "tag", "value": "RARE FIND", "disabled": true },
+                { "key": "condition", "value": "Like New", "disabled": true },
+                { "key": "era", "value": "Y2K", "disabled": true }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 ok', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('returns products', () => pm.expect(b.data.length).to.be.above(0));",
+                  "pm.test('only live stock is listed', () => b.data.forEach(p => pm.expect(p.stockQuantity).to.be.above(0)));",
+                  "// Capture a product for the cart/checkout folders.",
+                  "pm.environment.set('productId', b.data[0].id);",
+                  "pm.environment.set('productSize', b.data[0].sizes[0]);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Search products (?q=)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/products?q=denim",
+              "host": ["{{baseUrl}}"],
+              "path": ["products"],
+              "query": [{ "key": "q", "value": "denim" }]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": ["pm.test('200 ok', () => pm.response.to.have.status(200));"] }
+            }
+          ]
+        },
+        {
+          "name": "Product detail",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/products/{{productId}}", "host": ["{{baseUrl}}"], "path": ["products", "{{productId}}"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 ok', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.environment.set('productSize', b.sizes[0]);",
+                  "pm.test('has sizes and images', () => { pm.expect(b.sizes).to.be.an('array'); pm.expect(b.images).to.be.an('array'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Product detail — bad id (400)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/products/not-a-uuid", "host": ["{{baseUrl}}"], "path": ["products", "not-a-uuid"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": ["pm.test('validation rejects it', () => pm.response.to.have.status(400));"] }
+            }
+          ]
+        },
+        {
+          "name": "List categories",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/categories", "host": ["{{baseUrl}}"], "path": ["categories"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 ok', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.environment.set('categoryId', b.data[0].id);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 — Cart",
+      "item": [
+        {
+          "name": "Get cart",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/cart", "host": ["{{baseUrl}}"], "path": ["cart"] } },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": ["pm.test('200 ok', () => pm.response.to.have.status(200));"] }
+            }
+          ]
+        },
+        {
+          "name": "Get cart — no token (401)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/cart", "host": ["{{baseUrl}}"], "path": ["cart"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": ["pm.test('401 unauthorized', () => pm.response.to.have.status(401));"] }
+            }
+          ]
+        },
+        {
+          "name": "Add item to cart",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"productId\": \"{{productId}}\",\n  \"size\": \"{{productSize}}\",\n  \"qty\": 1\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/cart/items", "host": ["{{baseUrl}}"], "path": ["cart", "items"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 created', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.test('cart has the line', () => pm.expect(b.itemCount).to.be.above(0));",
+                  "pm.environment.set('cartItemId', b.items[0].id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Add item — invalid size (400)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"productId\": \"{{productId}}\",\n  \"size\": \"XXXXL\",\n  \"qty\": 1\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/cart/items", "host": ["{{baseUrl}}"], "path": ["cart", "items"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": ["pm.test('rejects unoffered size', () => pm.response.to.have.status(400));"] }
+            }
+          ]
+        },
+        {
+          "name": "Add item — qty over stock (409)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"productId\": \"{{productId}}\",\n  \"size\": \"{{productSize}}\",\n  \"qty\": 5\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/cart/items", "host": ["{{baseUrl}}"], "path": ["cart", "items"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409 conflict on one-of-one stock', () => pm.response.to.have.status(409));",
+                  "pm.test('reports what is available', () => pm.expect(pm.response.json().error.details).to.have.property('available'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update cart line qty",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"qty\": 1\n}" },
+            "url": { "raw": "{{baseUrl}}/cart/items/{{cartItemId}}", "host": ["{{baseUrl}}"], "path": ["cart", "items", "{{cartItemId}}"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": ["pm.test('200 ok', () => pm.response.to.have.status(200));"] }
+            }
+          ]
+        },
+        {
+          "name": "Merge guest cart (on login)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    { \"productId\": \"{{productId}}\", \"size\": \"{{productSize}}\", \"qty\": 1 }\n  ]\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/cart/merge", "host": ["{{baseUrl}}"], "path": ["cart", "merge"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 ok', () => pm.response.to.have.status(200));",
+                  "pm.test('reports skipped lines', () => pm.expect(pm.response.json()).to.have.property('skipped'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Remove cart line",
+          "request": {
+            "method": "DELETE",
+            "url": { "raw": "{{baseUrl}}/cart/items/{{cartItemId}}", "host": ["{{baseUrl}}"], "path": ["cart", "items", "{{cartItemId}}"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": ["pm.test('200 ok', () => pm.response.to.have.status(200));"] }
+            }
+          ]
+        },
+        {
+          "name": "Clear cart",
+          "request": { "method": "DELETE", "url": { "raw": "{{baseUrl}}/cart", "host": ["{{baseUrl}}"], "path": ["cart"] } },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 ok', () => pm.response.to.have.status(200));",
+                  "pm.test('cart is empty', () => pm.expect(pm.response.json().itemCount).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 — Wishlist",
+      "item": [
+        {
+          "name": "Toggle save (add)",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{baseUrl}}/wishlist/{{productId}}", "host": ["{{baseUrl}}"], "path": ["wishlist", "{{productId}}"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "pm.test('toggled', () => pm.expect(b).to.have.property('saved'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get wishlist",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/wishlist", "host": ["{{baseUrl}}"], "path": ["wishlist"] } },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": ["pm.test('200 ok', () => pm.response.to.have.status(200));"] }
+            }
+          ]
+        },
+        {
+          "name": "Merge guest wishlist",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"productIds\": [\"{{productId}}\"]\n}" },
+            "url": { "raw": "{{baseUrl}}/wishlist/merge", "host": ["{{baseUrl}}"], "path": ["wishlist", "merge"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": ["pm.test('200 ok', () => pm.response.to.have.status(200));"] }
+            }
+          ]
+        },
+        {
+          "name": "Remove from wishlist",
+          "request": {
+            "method": "DELETE",
+            "url": { "raw": "{{baseUrl}}/wishlist/{{productId}}", "host": ["{{baseUrl}}"], "path": ["wishlist", "{{productId}}"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": ["pm.test('200 ok', () => pm.response.to.have.status(200));"] }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "05 — Addresses",
+      "item": [
+        {
+          "name": "Create address",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"line1\": \"12 Linking Road\",\n  \"city\": \"Mumbai\",\n  \"state\": \"Maharashtra\",\n  \"postalCode\": \"400050\",\n  \"country\": \"India\",\n  \"isDefault\": true\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/addresses", "host": ["{{baseUrl}}"], "path": ["addresses"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 created', () => pm.response.to.have.status(201));",
+                  "pm.environment.set('addressId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List addresses",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/addresses", "host": ["{{baseUrl}}"], "path": ["addresses"] } },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": ["pm.test('200 ok', () => pm.response.to.have.status(200));"] }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "06 — Checkout & Payment (full happy path)",
+      "description": "Run these in order. Add to cart → create order (stock is held) → sign and post the webhook → order becomes paid.",
+      "item": [
+        {
+          "name": "Step 1 — Add item to cart",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"productId\": \"{{productId}}\",\n  \"size\": \"{{productSize}}\",\n  \"qty\": 1\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/cart/items", "host": ["{{baseUrl}}"], "path": ["cart", "items"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": ["pm.test('201 created', () => pm.response.to.have.status(201));"] }
+            }
+          ]
+        },
+        {
+          "name": "Step 2 — Create order (holds stock)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}",
+                "description": "Retrying with the same key returns the original order instead of holding stock twice."
+              }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"addressId\": \"{{addressId}}\"\n}" },
+            "url": { "raw": "{{baseUrl}}/orders", "host": ["{{baseUrl}}"], "path": ["orders"] }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.environment.set('idempotencyKey', `pm-${Date.now()}`);"]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 created', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.environment.set('orderId', b.order.id);",
+                  "pm.environment.set('gatewayRef', b.order.payment.gatewayRef);",
+                  "pm.test('starts as pending_payment', () => pm.expect(b.order.status).to.eql('pending_payment'));",
+                  "pm.test('returns a payment intent', () => pm.expect(b.paymentIntent.gatewayRef).to.be.a('string'));",
+                  "pm.test('stock hold has an expiry', () => pm.expect(b.order.expiresAt).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Step 3 — Replay same Idempotency-Key (returns original)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "{{idempotencyKey}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": { "raw": "{{baseUrl}}/orders", "host": ["{{baseUrl}}"], "path": ["orders"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200, not a second order', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('flagged as replay', () => pm.expect(b.replayed).to.be.true);",
+                  "pm.test('same order id', () => pm.expect(b.order.id).to.eql(pm.environment.get('orderId')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Step 4 — Product is now held (stock 0)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/products/{{productId}}", "host": ["{{baseUrl}}"], "path": ["products", "{{productId}}"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "pm.test('stock decremented to 0', () => pm.expect(b.stockQuantity).to.eql(0));",
+                  "pm.test('marked sold', () => pm.expect(b.status).to.eql('sold'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Step 5 — Sign the webhook payload (dev helper)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event\": \"payment.captured\",\n  \"payload\": {\n    \"payment\": {\n      \"entity\": {\n        \"id\": \"{{gatewayRef}}\",\n        \"amount\": 0,\n        \"notes\": { \"orderId\": \"{{orderId}}\" }\n      }\n    }\n  }\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/payments/mock/sign", "host": ["{{baseUrl}}"], "path": ["payments", "mock", "sign"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 ok', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.environment.set('webhookSignature', b.signature);",
+                  "// Store the exact body bytes that were signed — the signature covers them verbatim.",
+                  "pm.environment.set('webhookBody', JSON.stringify(b.body));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Step 6 — Webhook: payment.captured",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "x-webhook-signature", "value": "{{webhookSignature}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{{webhookBody}}" },
+            "url": { "raw": "{{baseUrl}}/payments/webhook", "host": ["{{baseUrl}}"], "path": ["payments", "webhook"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 ok', () => pm.response.to.have.status(200));",
+                  "pm.test('order marked paid', () => pm.expect(pm.response.json().orderStatus).to.eql('paid'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Step 7 — Webhook replay is idempotent",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "x-webhook-signature", "value": "{{webhookSignature}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{{webhookBody}}" },
+            "url": { "raw": "{{baseUrl}}/payments/webhook", "host": ["{{baseUrl}}"], "path": ["payments", "webhook"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('recognised as duplicate', () => pm.expect(pm.response.json().duplicate).to.be.true);",
+                  "pm.test('order still paid', () => pm.expect(pm.response.json().orderStatus).to.eql('paid'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Step 8 — Webhook with bad signature (401)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "x-webhook-signature", "value": "deadbeefdeadbeef" }
+            ],
+            "body": { "mode": "raw", "raw": "{{webhookBody}}" },
+            "url": { "raw": "{{baseUrl}}/payments/webhook", "host": ["{{baseUrl}}"], "path": ["payments", "webhook"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('forged webhook rejected', () => pm.response.to.have.status(401));"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Step 9 — Order status",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/orders/{{orderId}}", "host": ["{{baseUrl}}"], "path": ["orders", "{{orderId}}"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 ok', () => pm.response.to.have.status(200));",
+                  "pm.test('status is paid', () => pm.expect(pm.response.json().status).to.eql('paid'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Order history",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/orders", "host": ["{{baseUrl}}"], "path": ["orders"] } },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": ["pm.test('200 ok', () => pm.response.to.have.status(200));"] }
+            }
+          ]
+        },
+        {
+          "name": "Create order — empty cart (400)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": { "raw": "{{baseUrl}}/orders", "host": ["{{baseUrl}}"], "path": ["orders"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": ["pm.test('400 bad request', () => pm.response.to.have.status(400));"] }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "07 — Checkout: sold-out & cancel paths",
+      "item": [
+        {
+          "name": "Cancel order (releases stock)",
+          "description": "Cancels the order created in folder 06. The held item returns to the catalog with stock restored.",
+          "request": {
+            "method": "POST",
+            "url": { "raw": "{{baseUrl}}/orders/{{orderId}}/cancel", "host": ["{{baseUrl}}"], "path": ["orders", "{{orderId}}", "cancel"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Expect 409 if folder 06 already marked this order paid — cancel only applies to pending_payment.",
+                  "pm.test('cancelled, or refused because already paid', () => pm.expect([200, 409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Add a sold-out item to cart (409)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"productId\": \"{{productId}}\",\n  \"size\": \"{{productSize}}\",\n  \"qty\": 1\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/cart/items", "host": ["{{baseUrl}}"], "path": ["cart", "items"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// 404/409 once the item is sold; 201 if a cancel above returned it to stock.",
+                  "pm.test('sold item cannot be re-added', () => pm.expect([201, 404, 409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "08 — Reviews & Newsletter",
+      "item": [
+        {
+          "name": "Submit review (purchased item only)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"rating\": 5,\n  \"comment\": \"Exactly as described, great condition.\"\n}" },
+            "url": { "raw": "{{baseUrl}}/products/{{productId}}/reviews", "host": ["{{baseUrl}}"], "path": ["products", "{{productId}}", "reviews"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// 201 first time; 403 if this account never bought it; 409 if already reviewed.",
+                  "pm.test('review gated on purchase', () => pm.expect([201, 403, 409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Newsletter subscribe",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"newsletter@thriftvault.test\"\n}" },
+            "url": { "raw": "{{baseUrl}}/newsletter/subscribe", "host": ["{{baseUrl}}"], "path": ["newsletter", "subscribe"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 ok', () => pm.response.to.have.status(200));",
+                  "pm.test('subscribed', () => pm.expect(pm.response.json().subscribed).to.be.true);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "09 — Admin",
+      "description": "All requests here use {{adminToken}}. Run \"01 — Auth / Login (seeded admin)\" first.",
+      "item": [
+        {
+          "name": "Admin route as shopper (403)",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/admin/orders", "host": ["{{baseUrl}}"], "path": ["admin", "orders"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": ["pm.test('403 forbidden for non-admin', () => pm.response.to.have.status(403));"] }
+            }
+          ]
+        },
+        {
+          "name": "List all products (incl. sold/archived)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminToken}}", "type": "string" }] },
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/admin/products", "host": ["{{baseUrl}}"], "path": ["admin", "products"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": ["pm.test('200 ok', () => pm.response.to.have.status(200));"] }
+            }
+          ]
+        },
+        {
+          "name": "Create product listing",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Vintage Corduroy Blazer\",\n  \"brand\": \"Wrangler\",\n  \"categoryId\": \"{{categoryId}}\",\n  \"priceCents\": 4900,\n  \"originalPriceCents\": 13000,\n  \"condition\": \"Like New\",\n  \"era\": \"70s\",\n  \"tag\": \"ONE OF ONE\",\n  \"stockQuantity\": 1,\n  \"description\": \"Rust corduroy blazer, boxy fit, no flaws.\",\n  \"sizes\": [\"S\", \"M\"],\n  \"images\": [\"https://picsum.photos/seed/corduroyblazer/600/750\"]\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/admin/products", "host": ["{{baseUrl}}"], "path": ["admin", "products"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 created', () => pm.response.to.have.status(201));",
+                  "pm.environment.set('adminProductId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Edit / archive product",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminToken}}", "type": "string" }] },
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"priceCents\": 4500,\n  \"tag\": \"TRENDING\"\n}" },
+            "url": { "raw": "{{baseUrl}}/admin/products/{{adminProductId}}", "host": ["{{baseUrl}}"], "path": ["admin", "products", "{{adminProductId}}"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 ok', () => pm.response.to.have.status(200));",
+                  "pm.test('price updated', () => pm.expect(pm.response.json().priceCents).to.eql(4500));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Upload product images (form-data)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminToken}}", "type": "string" }] },
+            "method": "POST",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "images",
+                  "type": "file",
+                  "src": [],
+                  "description": "Pick one or more local JPEG/PNG/WebP/AVIF files (max 5MB each, 8 files)."
+                }
+              ]
+            },
+            "url": { "raw": "{{baseUrl}}/admin/products/{{adminProductId}}/images", "host": ["{{baseUrl}}"], "path": ["admin", "products", "{{adminProductId}}", "images"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// 400 until you attach a file in the Body tab.",
+                  "pm.test('201 once a file is attached', () => pm.expect([201, 400]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create category",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Knitwear\"\n}" },
+            "url": { "raw": "{{baseUrl}}/admin/categories", "host": ["{{baseUrl}}"], "path": ["admin", "categories"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('created, or 409 if it already exists', () => pm.expect([201, 409]).to.include(pm.response.code));"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List all orders",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminToken}}", "type": "string" }] },
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/admin/orders",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "orders"],
+              "query": [{ "key": "status", "value": "paid", "disabled": true }]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": ["pm.test('200 ok', () => pm.response.to.have.status(200));"] }
+            }
+          ]
+        },
+        {
+          "name": "Update fulfillment status",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminToken}}", "type": "string" }] },
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"status\": \"fulfilled\"\n}" },
+            "url": { "raw": "{{baseUrl}}/admin/orders/{{orderId}}", "host": ["{{baseUrl}}"], "path": ["admin", "orders", "{{orderId}}"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": ["pm.test('200 ok', () => pm.response.to.have.status(200));"] }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
