@@ -4,7 +4,12 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  // Queries go through Neon's pooler, which is what keeps serverless instances
+  // from exhausting the connection limit.
   url      = env("DATABASE_URL")
+  // Migrations cannot run over a transaction pooler, so they need the direct
+  // connection. Locally both point at the same container.
+  directUrl = env("DATABASE_URL_UNPOOLED")
 }
 
 enum Role {
