@@ -4,8 +4,18 @@ import * as catalogService from "./catalog.service.js"
 import { validate } from "../../middleware/validate.js"
 import { requireAuth } from "../../middleware/auth.js"
 import { asyncHandler } from "../../lib/errors.js"
+import { sweepIfDue } from "../../jobs/releaseExpiredOrders.js"
 
 const router = Router()
+
+// Stock held by an abandoned checkout is invisible until it is released, so the
+// catalogue is the one place worth paying for a (throttled) sweep before reading.
+router.use(
+  asyncHandler(async (_req, _res, next) => {
+    await sweepIfDue()
+    next()
+  })
+)
 
 const listQuery = z.object({
   category: z.string().optional(),

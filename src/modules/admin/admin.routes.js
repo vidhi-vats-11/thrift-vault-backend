@@ -1,35 +1,24 @@
 import { Router } from "express"
 import { z } from "zod"
 import multer from "multer"
-import path from "node:path"
-import fs from "node:fs"
-import { randomUUID } from "node:crypto"
 import { prisma } from "../../config/prisma.js"
-import { env } from "../../config/env.js"
 import { validate } from "../../middleware/validate.js"
 import { requireAuth, requireAdmin } from "../../middleware/auth.js"
 import { ApiError, asyncHandler } from "../../lib/errors.js"
+import { storeImage } from "../../lib/storage.js"
 import { productInclude, serializeProduct } from "../catalog/product.serializer.js"
 import { serializeOrder } from "../order/order.service.js"
 
 const router = Router()
 router.use(requireAuth, requireAdmin)
 
-fs.mkdirSync(env.uploadDir, { recursive: true })
-
 const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/avif"])
 
 const upload = multer({
-  storage: multer.diskStorage({
-    destination: (_req, _file, cb) => cb(null, env.uploadDir),
-    // Never derive the stored name from the client-supplied filename — that is a
-    // path-traversal vector. Only the extension is carried over, and only if it is safe.
-    filename: (_req, file, cb) => {
-      const ext = path.extname(file.originalname).toLowerCase()
-      const safeExt = /^\.[a-z0-9]{2,5}$/.test(ext) ? ext : ".jpg"
-      cb(null, `${randomUUID()}${safeExt}`)
-    },
-  }),
+  // Buffered rather than written straight to disk, so lib/storage.js can send the
+  // bytes to whichever backend this environment uses. The 5 MB cap below keeps
+  // the buffers small enough to hold in memory.
+  storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024, files: 8 },
   fileFilter: (_req, file, cb) => {
     if (!ALLOWED_IMAGE_TYPES.has(file.mimetype)) {
@@ -135,10 +124,11 @@ router.post(
     if (!req.files?.length) throw ApiError.badRequest("No images uploaded")
 
     const startOrder = product.images.length
+    const urls = await Promise.all(req.files.map((file) => storeImage(file)))
     await prisma.productImage.createMany({
-      data: req.files.map((file, index) => ({
+      data: urls.map((url, index) => ({
         productId: product.id,
-        url: `/uploads/${file.filename}`,
+        url,
         sortOrder: startOrder + index,
       })),
     })

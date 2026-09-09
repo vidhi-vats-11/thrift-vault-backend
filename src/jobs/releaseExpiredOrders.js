@@ -18,6 +18,24 @@ export const releaseExpiredOrders = async () => {
   return expired.length
 }
 
+let lastSweepAt = 0
+
+// Serverless functions cannot hold a timer, and Vercel's Hobby plan only triggers
+// cron once a day — far too slow when an abandoned checkout hides a one-of-one
+// item from the catalogue. So browsing also drives the sweep, throttled so it
+// costs one extra query a minute rather than one per request.
+export const sweepIfDue = async (minIntervalMs = 60_000) => {
+  const now = Date.now()
+  if (now - lastSweepAt < minIntervalMs) return
+  lastSweepAt = now
+  try {
+    await releaseExpiredOrders()
+  } catch (err) {
+    // A failed sweep must never break the request that happened to trigger it.
+    logger.error("lazy_sweep_failed", { message: err.message })
+  }
+}
+
 export const startOrderSweeper = (intervalMs = 60_000) => {
   const timer = setInterval(() => {
     releaseExpiredOrders().catch((err) =>

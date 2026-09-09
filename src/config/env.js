@@ -13,7 +13,15 @@ export const env = {
   port: Number(process.env.PORT ?? 4000),
   databaseUrl: required("DATABASE_URL"),
   redisUrl: process.env.REDIS_URL ?? "",
-  corsOrigins: (process.env.CORS_ORIGINS ?? "http://localhost:5173").split(","),
+  // Vercel sets this on every deployment. It gates the behaviour that assumes a
+  // long-lived process with a writable disk.
+  isServerless: Boolean(process.env.VERCEL),
+  // Trimmed because these are typed into a dashboard field, where a stray space
+  // after a comma would silently break CORS for that origin.
+  corsOrigins: (process.env.CORS_ORIGINS ?? "http://localhost:5173")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean),
   jwt: {
     accessSecret: required("JWT_ACCESS_SECRET"),
     refreshSecret: required("JWT_REFRESH_SECRET"),
@@ -26,4 +34,10 @@ export const env = {
   },
   orderHoldMinutes: Number(process.env.ORDER_HOLD_MINUTES ?? 15),
   uploadDir: process.env.UPLOAD_DIR ?? "uploads",
+  // Set automatically by the Vercel Blob integration. Its presence is what
+  // switches image storage from local disk to Blob — see lib/storage.js.
+  blobToken: process.env.BLOB_READ_WRITE_TOKEN ?? "",
+  // Shared secret Vercel Cron sends as a bearer token, so the sweep endpoint
+  // cannot be triggered by anyone who guesses the URL.
+  cronSecret: process.env.CRON_SECRET ?? "",
 }

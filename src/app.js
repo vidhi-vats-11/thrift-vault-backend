@@ -14,6 +14,7 @@ import paymentRoutes from "./modules/payment/payment.routes.js"
 import newsletterRoutes from "./modules/newsletter/newsletter.routes.js"
 import addressRoutes from "./modules/address/address.routes.js"
 import adminRoutes from "./modules/admin/admin.routes.js"
+import internalRoutes from "./modules/internal/internal.routes.js"
 
 export const createApp = () => {
   const app = express()
@@ -33,7 +34,11 @@ export const createApp = () => {
   )
   app.use(requestContext)
 
-  app.use("/uploads", express.static(path.resolve(env.uploadDir)))
+  // Only meaningful when images are on local disk. On Vercel they live in Blob
+  // and ProductImage.url already holds an absolute URL, so nothing routes here.
+  if (!env.blobToken) {
+    app.use("/uploads", express.static(path.resolve(env.uploadDir)))
+  }
 
   app.get("/health", (_req, res) => res.json({ status: "ok", uptime: process.uptime() }))
 
@@ -47,6 +52,7 @@ export const createApp = () => {
   v1.use("/newsletter", newsletterRoutes)
   v1.use("/addresses", addressRoutes)
   v1.use("/admin", adminRoutes)
+  v1.use("/internal", internalRoutes)
 
   app.use("/api/v1", v1)
 
@@ -55,3 +61,8 @@ export const createApp = () => {
 
   return app
 }
+
+// Vercel detects this file as the entrypoint (it imports Express and sits at the
+// conventional src/app path) and introspects the routes off this default export.
+// server.js imports the same instance so both paths run identical wiring.
+export default createApp()
