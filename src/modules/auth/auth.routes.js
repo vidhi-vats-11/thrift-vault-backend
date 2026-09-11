@@ -23,6 +23,17 @@ const loginSchema = z.object({
 
 const refreshSchema = z.object({ refreshToken: z.string().min(1) })
 
+// Every field optional so the form can send a partial update. Phone allows "" so a
+// shopper can clear it; the service turns that back into NULL. Digits/spaces and the
+// usual punctuation only — deliberately loose, because phone formats vary by country.
+const profileSchema = z
+  .object({
+    name: z.string().min(1).max(80),
+    phone: z.union([z.string().regex(/^[\d\s+()-]{6,20}$/, "Enter a valid phone number"), z.literal("")]),
+    gender: z.enum(["women", "men", "other", "prefer_not_to_say", ""]),
+  })
+  .partial()
+
 router.post(
   "/signup",
   authLimiter,
@@ -65,6 +76,15 @@ router.get(
   requireAuth,
   asyncHandler(async (req, res) => {
     res.json(await authService.me(req.user.id))
+  })
+)
+
+router.patch(
+  "/me",
+  requireAuth,
+  validate({ body: profileSchema }),
+  asyncHandler(async (req, res) => {
+    res.json(await authService.updateProfile(req.user.id, req.body))
   })
 )
 

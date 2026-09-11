@@ -17,17 +17,51 @@ enum Role {
   admin
 }
 
+// What a shopper tells us about themselves. Separate from ProductGender because a
+// person can decline to answer, while a garment is always tagged something.
+enum Gender {
+  women
+  men
+  other
+  prefer_not_to_say
+}
+
+// Who a garment is cut for. `unisex` is the default and by far the commonest case
+// in secondhand streetwear, so an untagged item never disappears from anyone's view.
+enum ProductGender {
+  women
+  men
+  unisex
+}
+
 enum ProductStatus {
   live
   sold
   archived
 }
 
+// `shipped` and `delivered` exist so order tracking has something real to show —
+// without them a "track order" timeline would be decoration. `fulfilled` predates
+// them and is kept so existing rows stay valid; it reads as the terminal state.
 enum OrderStatus {
   pending_payment
   paid
+  shipped
+  delivered
   cancelled
   fulfilled
+}
+
+enum ReturnType {
+  refund
+  exchange
+}
+
+enum ReturnStatus {
+  requested
+  approved
+  rejected
+  completed
 }
 
 enum PaymentStatus {
@@ -43,6 +77,10 @@ model User {
   passwordHash  String         @map("password_hash")
   name          String
   role          Role           @default(user)
+  // Profile fields. All optional: an account is usable without ever filling them in,
+  // and `gender` only ever re-orders search results, never restricts them.
+  phone         String?
+  gender        Gender?
   createdAt     DateTime       @default(now()) @map("created_at")
 
   addresses     Address[]
@@ -50,6 +88,7 @@ model User {
   wishlistItems WishlistItem[]
   orders        Order[]
   reviews       Review[]
+  returns       Return[]
   refreshTokens RefreshToken[]
 
   @@map("users")
@@ -108,6 +147,7 @@ model Product {
   originalPriceCents Int?          @map("original_price_cents")
   condition          String
   era                String
+  gender             ProductGender @default(unisex)
   tag                String?
   stockQuantity      Int           @default(1) @map("stock_quantity")
   version            Int           @default(0)
@@ -217,11 +257,35 @@ model OrderItem {
   qty        Int
   priceCents Int    @map("price_cents")
 
-  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product Product @relation(fields: [productId], references: [id])
+  order   Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product  @relation(fields: [productId], references: [id])
+  returns Return[]
 
   @@index([orderId])
   @@map("order_items")
+}
+
+// Returns hang off an OrderItem rather than an Order, because a shopper who bought
+// three pieces may only want to send one back. Anchoring at the order would force
+// an all-or-nothing return, which is not how any real store works.
+model Return {
+  id          String       @id @default(uuid())
+  orderItemId String       @map("order_item_id")
+  userId      String       @map("user_id")
+  type        ReturnType
+  reason      String
+  note        String?
+  status      ReturnStatus @default(requested)
+  createdAt   DateTime     @default(now()) @map("created_at")
+  resolvedAt  DateTime?    @map("resolved_at")
+
+  orderItem OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+  @@index([orderItemId])
+  @@map("returns")
 }
 
 model Payment {

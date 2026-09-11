@@ -80,6 +80,9 @@ const seedProducts = async (categories) => {
       originalPriceCents: item.originalPrice * 100,
       condition: item.condition,
       era: item.era,
+      // Untagged listings fall back to unisex, so a missing tag never hides an
+      // item from anyone — gender only ever re-orders results.
+      gender: item.gender ?? "unisex",
       tag: item.tag,
       description: item.description,
       highlights: item.highlights,
@@ -166,8 +169,12 @@ const seedReviews = async (productsBySeed, reviewerIds) => {
     if (already > 0) continue // don't duplicate on re-seed
 
     const rand = makeRandom(item.seed)
-    const count = Math.min(item.reviewCount, reviewerIds.length)
-    const ratings = buildRatings(count, item.rating, rand)
+    // Listings that don't hand-pick a score get a plausible one derived from their
+    // own seed, so they are stable across re-seeds rather than random each run.
+    const rating = item.rating ?? Math.round((4.3 + rand() * 0.6) * 10) / 10
+    const reviewCount = item.reviewCount ?? 8 + Math.floor(rand() * 40)
+    const count = Math.min(reviewCount, reviewerIds.length)
+    const ratings = buildRatings(count, rating, rand)
 
     // Shuffle reviewers deterministically so each product gets a different set
     const shuffled = [...reviewerIds]

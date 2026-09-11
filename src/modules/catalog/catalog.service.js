@@ -1,6 +1,7 @@
 import { prisma } from "../../config/prisma.js"
 import { ApiError } from "../../lib/errors.js"
 import { productInclude, serializeProduct } from "./product.serializer.js"
+import { parseSearchIntent, genderRanker } from "./searchIntent.js"
 
 const reviewStatsFor = async (productIds) => {
   if (productIds.length === 0) return new Map()
@@ -18,42 +19,110 @@ const reviewStatsFor = async (productIds) => {
   )
 }
 
-export const listProducts = async ({ category, q, tag, condition, era, page, limit, sort }) => {
-  const where = {
+/** One word per field, OR'd across the fields a shopper might have meant. */
+const textMatch = (term) => ({
+  OR: [
+    { name: { contains: term, mode: "insensitive" } },
+    { brand: { contains: term, mode: "insensitive" } },
+    { description: { contains: term, mode: "insensitive" } },
+  ],
+})
+
+export const listProducts = async ({
+  category,
+  q,
+  tag,
+  condition,
+  era,
+  page,
+  limit,
+  sort,
+  viewerGender,
+}) => {
+  const intent = parseSearchIntent(q)
+
+  // An explicit category filter from the UI always wins over one inferred from the
+  // query text — the shopper clicked it, so it is not a guess.
+  const categoryFilter =
+    category && category !== "All"
+      ? { category: { name: category } }
+      : intent.categories.length > 0
+        ? { category: { name: { in: intent.categories } } }
+        : {}
+
+  const baseWhere = {
     status: "live",
     stockQuantity: { gt: 0 },
-    ...(category && category !== "All" ? { category: { name: category } } : {}),
     ...(tag ? { tag } : {}),
     ...(condition ? { condition } : {}),
     ...(era ? { era } : {}),
-    ...(q
-      ? {
-          OR: [
-            { name: { contains: q, mode: "insensitive" } },
-            { brand: { contains: q, mode: "insensitive" } },
-            { description: { contains: q, mode: "insensitive" } },
-          ],
-        }
-      : {}),
+    ...(intent.maxPrice ? { priceCents: { lte: intent.maxPrice * 100 } } : {}),
   }
 
+  // Leftover words must all match (AND), so "levis jeans" is denim by Levi's rather
+  // than denim OR anything Levi's ever made.
+  const termFilter = intent.terms.length > 0 ? { AND: intent.terms.map(textMatch) } : {}
+
+  let where = { ...baseWhere, ...categoryFilter, ...termFilter }
+  let total = await prisma.product.count({ where })
+
+  // Safety net: the dictionary understood the query (say "jeans") but the leftover
+  // words matched nothing. Rather than show an empty grid, drop the words and keep
+  // the part we did understand.
+  if (total === 0 && intent.matched && intent.terms.length > 0) {
+    where = { ...baseWhere, ...categoryFilter }
+    total = await prisma.product.count({ where })
+  }
+
+  // "newest" is the schema default, i.e. "the shopper did not choose a sort", so a
+  // price hint parsed out of the query ("cheap jeans") is allowed to win over it.
+  const explicitSort = sort && sort !== "newest" ? sort : intent.sort
   const orderBy =
-    sort === "price_asc"
+    explicitSort === "price_asc"
       ? { priceCents: "asc" }
-      : sort === "price_desc"
+      : explicitSort === "price_desc"
         ? { priceCents: "desc" }
         : { createdAt: "desc" }
 
-  const [total, rows] = await Promise.all([
-    prisma.product.count({ where }),
-    prisma.product.findMany({
+  const rank = genderRanker(viewerGender)
+  let rows
+
+  if (rank) {
+    // Gender PRIORITISES, it never filters — nothing is hidden from anyone. Prisma's
+    // orderBy cannot express "these enum values first", so the ordering is done here:
+    // pull the matching ids (a narrow, cheap select), stable-sort them by whether the
+    // gender is preferred, then page the sorted ids and fetch only that page in full.
+    // Sorting in JS *after* paging would be wrong — it would only reorder within a
+    // page, which is not the same thing at all.
+    const keys = await prisma.product.findMany({
+      where,
+      select: { id: true, gender: true, priceCents: true, createdAt: true },
+    })
+
+    keys.sort((a, b) => {
+      if (rank(a.gender) !== rank(b.gender)) return rank(a.gender) - rank(b.gender)
+      if (explicitSort === "price_asc") return a.priceCents - b.priceCents
+      if (explicitSort === "price_desc") return b.priceCents - a.priceCents
+      return b.createdAt - a.createdAt
+    })
+
+    const pageIds = keys.slice((page - 1) * limit, page * limit).map((k) => k.id)
+    const found = await prisma.product.findMany({
+      where: { id: { in: pageIds } },
+      include: productInclude,
+    })
+    // findMany ignores the order of an `in` list, so restore it.
+    const byId = new Map(found.map((p) => [p.id, p]))
+    rows = pageIds.map((id) => byId.get(id)).filter(Boolean)
+  } else {
+    rows = await prisma.product.findMany({
       where,
       include: productInclude,
       orderBy,
       skip: (page - 1) * limit,
       take: limit,
-    }),
-  ])
+    })
+  }
 
   const stats = await reviewStatsFor(rows.map((r) => r.id))
 

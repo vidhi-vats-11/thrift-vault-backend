@@ -5,9 +5,11 @@ import { prisma } from "../../config/prisma.js"
 import { validate } from "../../middleware/validate.js"
 import { requireAuth, requireAdmin } from "../../middleware/auth.js"
 import { ApiError, asyncHandler } from "../../lib/errors.js"
+import { logger } from "../../lib/logger.js"
 import { storeImage } from "../../lib/storage.js"
 import { productInclude, serializeProduct } from "../catalog/product.serializer.js"
 import { serializeOrder } from "../order/order.service.js"
+import * as returnService from "../order/return.service.js"
 
 const router = Router()
 router.use(requireAuth, requireAdmin)
@@ -179,7 +181,11 @@ router.patch(
   "/orders/:id",
   validate({
     params: idParam,
-    body: z.object({ status: z.enum(["paid", "cancelled", "fulfilled"]) }),
+    // shipped/delivered added so an admin can actually walk an order along the
+    // tracking timeline the Orders page renders.
+    body: z.object({
+      status: z.enum(["paid", "shipped", "delivered", "cancelled", "fulfilled"]),
+    }),
   }),
   asyncHandler(async (req, res) => {
     const order = await prisma.order.findUnique({ where: { id: req.params.id } })
@@ -195,6 +201,78 @@ router.patch(
       },
     })
     res.json(serializeOrder(updated))
+  })
+)
+
+router.get(
+  "/returns",
+  validate({
+    query: z.object({
+      status: z.enum(["requested", "approved", "rejected", "completed"]).optional(),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    res.json({ data: await returnService.listAllReturns(req.validatedQuery.status) })
+  })
+)
+
+router.patch(
+  "/returns/:id",
+  validate({
+    params: idParam,
+    body: z.object({ status: z.enum(["approved", "rejected", "completed"]) }),
+  }),
+  asyncHandler(async (req, res) => {
+    res.json(await returnService.resolveReturn(req.params.id, req.body.status))
+  })
+)
+
+// Deleting an order is destructive and, for a one-of-one catalogue, dangerous:
+// a pending_payment order still *holds* its items, so removing the row without
+// putting the stock back would strand those pieces as permanently unbuyable —
+// the exact failure releaseExpiredOrders exists to prevent. So the release and
+// the delete happen in one transaction, and only for orders that still hold
+// stock. A cancelled order already gave its items back (releaseOrder did it),
+// and a paid/fulfilled order's items were genuinely sold, so neither should be
+// restocked here.
+router.delete(
+  "/orders/:id",
+  validate({ params: idParam }),
+  asyncHandler(async (req, res) => {
+    const deleted = await prisma.$transaction(async (tx) => {
+      const order = await tx.order.findUnique({
+        where: { id: req.params.id },
+        include: { items: true },
+      })
+      if (!order) throw ApiError.notFound("Order not found")
+
+      if (order.status === "pending_payment") {
+        for (const item of order.items) {
+          await tx.product.update({
+            where: { id: item.productId },
+            data: {
+              stockQuantity: { increment: item.qty },
+              status: "live",
+              version: { increment: 1 },
+            },
+          })
+        }
+      }
+
+      // order_items and payments both declare onDelete: Cascade, so this one
+      // delete takes the whole order with it.
+      await tx.order.delete({ where: { id: order.id } })
+      return order
+    })
+
+    logger.info("order_deleted_by_admin", {
+      orderId: deleted.id,
+      status: deleted.status,
+      restocked: deleted.status === "pending_payment" ? deleted.items.length : 0,
+      adminId: req.user.id,
+    })
+
+    res.status(204).end()
   })
 )
 

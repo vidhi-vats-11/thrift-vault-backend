@@ -4,11 +4,49 @@ import { env } from "../../config/env.js"
 import { ApiError } from "../../lib/errors.js"
 import { logger } from "../../lib/logger.js"
 import { gateway } from "../payment/gateway.js"
+// One-way import: return.service knows nothing about order.service, so the
+// eligibility rule lives in one place without creating a cycle.
+import { returnEligibility } from "./return.service.js"
 
 const orderInclude = {
-  items: { include: { product: { include: { images: { orderBy: { sortOrder: "asc" } } } } } },
+  items: {
+    include: {
+      product: { include: { images: { orderBy: { sortOrder: "asc" } } } },
+      // Pulled in so each line can say whether it is already being returned, and
+      // whether a new return is still allowed — the Orders page needs both to
+      // decide between a "Return or exchange" button and a status badge.
+      returns: { orderBy: { createdAt: "desc" } },
+    },
+  },
   payments: { orderBy: { createdAt: "desc" } },
   address: true,
+}
+
+/**
+ * Per-line return state for the Orders page.
+ *
+ * Computed on the server rather than in React so the button the shopper sees and
+ * the rule the API enforces can never disagree — the UI simply renders whatever
+ * this says. `returnBlockedReason` exists so a disabled button can explain itself
+ * instead of just looking broken.
+ */
+const returnStateFor = (item, order) => {
+  const open = (item.returns ?? []).find((r) => r.status === "requested" || r.status === "approved")
+  const latest = (item.returns ?? [])[0] ?? null
+  const { eligible, reason } = returnEligibility(item, order, open)
+  return {
+    canReturn: eligible,
+    returnBlockedReason: reason,
+    activeReturn: latest
+      ? {
+          id: latest.id,
+          reference: `TV-${latest.id.slice(0, 8).toUpperCase()}`,
+          type: latest.type,
+          status: latest.status,
+          createdAt: latest.createdAt,
+        }
+      : null,
+  }
 }
 
 export const serializeOrder = (order) => ({
@@ -30,6 +68,7 @@ export const serializeOrder = (order) => ({
     qty: item.qty,
     priceCents: item.priceCents,
     lineTotalCents: item.priceCents * item.qty,
+    ...returnStateFor(item, order),
   })),
   payment: order.payments?.[0]
     ? {

@@ -14,6 +14,8 @@ const publicUser = (user) => ({
   email: user.email,
   name: user.name,
   role: user.role,
+  phone: user.phone,
+  gender: user.gender,
   createdAt: user.createdAt,
 })
 
@@ -81,5 +83,19 @@ export const logout = async (refreshToken) => {
 export const me = async (userId) => {
   const user = await prisma.user.findUnique({ where: { id: userId } })
   if (!user) throw ApiError.notFound("User not found")
+  return publicUser(user)
+}
+
+// Only the three profile fields are writable here. Email is deliberately excluded:
+// it is the login identifier and changing it needs a verification flow, not a
+// PATCH. Role is excluded so nobody can promote themselves to admin.
+export const updateProfile = async (userId, patch) => {
+  const data = {}
+  if (patch.name !== undefined) data.name = patch.name
+  // Empty string from a cleared form field means "unset", which is null in the DB.
+  if (patch.phone !== undefined) data.phone = patch.phone === "" ? null : patch.phone
+  if (patch.gender !== undefined) data.gender = patch.gender === "" ? null : patch.gender
+
+  const user = await prisma.user.update({ where: { id: userId }, data })
   return publicUser(user)
 }

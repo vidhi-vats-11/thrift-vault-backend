@@ -23,6 +23,7 @@ export const serializeProduct = (product, stats) => ({
   sizes: product.sizes?.map((s) => s.size) ?? [],
   condition: product.condition,
   era: product.era,
+  gender: product.gender,
   tag: product.tag,
   description: product.description,
   highlights: product.highlights ?? [],

@@ -2,7 +2,8 @@ import { Router } from "express"
 import { z } from "zod"
 import * as catalogService from "./catalog.service.js"
 import { validate } from "../../middleware/validate.js"
-import { requireAuth } from "../../middleware/auth.js"
+import { requireAuth, attachUser } from "../../middleware/auth.js"
+import { prisma } from "../../config/prisma.js"
 import { asyncHandler } from "../../lib/errors.js"
 import { sweepIfDue } from "../../jobs/releaseExpiredOrders.js"
 
@@ -37,9 +38,22 @@ const reviewSchema = z.object({
 
 router.get(
   "/products",
+  // Optional auth: signed-in shoppers get their gender used as a ranking hint,
+  // anonymous ones get the default order. Read from the database rather than the
+  // token so that changing it in Account settings takes effect immediately instead
+  // of after the 15-minute access token expires.
+  attachUser,
   validate({ query: listQuery }),
   asyncHandler(async (req, res) => {
-    res.json(await catalogService.listProducts(req.validatedQuery))
+    let viewerGender = null
+    if (req.user?.id) {
+      const viewer = await prisma.user.findUnique({
+        where: { id: req.user.id },
+        select: { gender: true },
+      })
+      viewerGender = viewer?.gender ?? null
+    }
+    res.json(await catalogService.listProducts({ ...req.validatedQuery, viewerGender }))
   })
 )
 
