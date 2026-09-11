@@ -237,16 +237,40 @@ model Order {
   status         OrderStatus @default(pending_payment)
   idempotencyKey String?     @unique @map("idempotency_key")
   expiresAt      DateTime?   @map("expires_at")
+  // Delivery promise and the two milestones worth stamping. Kept on the order
+  // rather than derived from events so "arriving by" survives even if nobody has
+  // logged a checkpoint yet.
+  expectedDeliveryAt DateTime? @map("expected_delivery_at")
+  shippedAt          DateTime? @map("shipped_at")
+  deliveredAt        DateTime? @map("delivered_at")
   createdAt      DateTime    @default(now()) @map("created_at")
 
   user     User        @relation(fields: [userId], references: [id])
   address  Address?    @relation(fields: [addressId], references: [id])
   items    OrderItem[]
   payments Payment[]
+  events   OrderEvent[]
 
   @@index([userId])
   @@index([status])
   @@map("orders")
+}
+
+// One line of the parcel's journey — "Left our studio", "Reached Mumbai hub",
+// "Out for delivery". Separate rows rather than a status field because tracking is
+// a history, not a state: the shopper wants to see where it has been, and an order
+// can pass through several places while its status stays "shipped".
+model OrderEvent {
+  id        String   @id @default(uuid())
+  orderId   String   @map("order_id")
+  label     String
+  location  String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@map("order_events")
 }
 
 model OrderItem {

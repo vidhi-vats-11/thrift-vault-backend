@@ -8,6 +8,13 @@ import { gateway } from "../payment/gateway.js"
 // eligibility rule lives in one place without creating a cycle.
 import { returnEligibility } from "./return.service.js"
 
+// How long after payment we promise delivery. A single named constant so the
+// customer's "arriving by" and the admin's default ETA can never disagree.
+export const DELIVERY_DAYS = 5
+
+export const estimateDelivery = (from = new Date()) =>
+  new Date(from.getTime() + DELIVERY_DAYS * 86400000)
+
 const orderInclude = {
   items: {
     include: {
@@ -20,6 +27,7 @@ const orderInclude = {
   },
   payments: { orderBy: { createdAt: "desc" } },
   address: true,
+  events: { orderBy: { createdAt: "desc" } },
 }
 
 /**
@@ -57,6 +65,16 @@ export const serializeOrder = (order) => ({
   total: order.totalCents / 100,
   expiresAt: order.expiresAt,
   createdAt: order.createdAt,
+  expectedDeliveryAt: order.expectedDeliveryAt ?? null,
+  shippedAt: order.shippedAt ?? null,
+  deliveredAt: order.deliveredAt ?? null,
+  // Newest first, which is how a tracking page reads — latest position at the top.
+  events: (order.events ?? []).map((e) => ({
+    id: e.id,
+    label: e.label,
+    location: e.location,
+    createdAt: e.createdAt,
+  })),
   address: order.address ?? null,
   items: order.items.map((item) => ({
     id: item.id,
@@ -252,6 +270,65 @@ export const releaseOrder = async (orderId, reason) => {
     logger.info("order_released", { orderId, reason })
     return cancelled
   })
+}
+
+// Default wording for each milestone, so an admin who just flips the status still
+// produces a readable tracking line instead of a bare enum name.
+const EVENT_LABELS = {
+  paid: "Payment confirmed",
+  shipped: "Dispatched from our studio",
+  delivered: "Delivered",
+  fulfilled: "Delivered",
+  cancelled: "Order cancelled",
+}
+
+/**
+ * Moves an order to a new status and records the journey.
+ *
+ * Status and history are written together in one transaction: a parcel that is
+ * marked shipped but has no "dispatched" line, or vice versa, would make the
+ * customer's tracking page contradict the admin's. Milestone timestamps are
+ * stamped here rather than trusted from the client.
+ */
+export const setOrderStatus = async (orderId, status, { location, note } = {}) => {
+  return prisma.$transaction(async (tx) => {
+    const order = await tx.order.findUnique({ where: { id: orderId } })
+    if (!order) throw ApiError.notFound("Order not found")
+
+    const data = { status }
+    if (status === "shipped" && !order.shippedAt) {
+      data.shippedAt = new Date()
+      // Only promise a date once the parcel is actually moving, and don't
+      // overwrite a date an admin has already set by hand.
+      if (!order.expectedDeliveryAt) data.expectedDeliveryAt = estimateDelivery()
+    }
+    if ((status === "delivered" || status === "fulfilled") && !order.deliveredAt) {
+      data.deliveredAt = new Date()
+    }
+
+    await tx.order.update({ where: { id: orderId }, data })
+    await tx.orderEvent.create({
+      data: {
+        orderId,
+        label: note?.trim() || EVENT_LABELS[status] || `Status changed to ${status}`,
+        location: location?.trim() || null,
+      },
+    })
+
+    logger.info("order_status_changed", { orderId, status, location: location ?? null })
+    return tx.order.findUnique({ where: { id: orderId }, include: orderInclude })
+  })
+}
+
+/** A tracking line that doesn't change the status — "Reached Mumbai hub". */
+export const addOrderEvent = async (orderId, { label, location }) => {
+  const order = await prisma.order.findUnique({ where: { id: orderId } })
+  if (!order) throw ApiError.notFound("Order not found")
+
+  await prisma.orderEvent.create({
+    data: { orderId, label: label.trim(), location: location?.trim() || null },
+  })
+  return prisma.order.findUnique({ where: { id: orderId }, include: orderInclude })
 }
 
 export const cancelOrder = async (userId, orderId) => {

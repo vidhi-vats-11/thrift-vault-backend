@@ -4,7 +4,7 @@ import { z } from "zod"
 import { prisma } from "../../config/prisma.js"
 import { env } from "../../config/env.js"
 import { gateway } from "./gateway.js"
-import { releaseOrder } from "../order/order.service.js"
+import { releaseOrder, estimateDelivery } from "../order/order.service.js"
 import { requireAuth, requireAdmin } from "../../middleware/auth.js"
 import { validate } from "../../middleware/validate.js"
 import { ApiError, asyncHandler } from "../../lib/errors.js"
@@ -31,7 +31,17 @@ const settlePayment = async (payment, event) => {
       prisma.payment.update({ where: { id: payment.id }, data: { status: "captured" } }),
       prisma.order.update({
         where: { id: payment.orderId },
-        data: { status: "paid", expiresAt: null },
+        data: {
+          status: "paid",
+          expiresAt: null,
+          // Promise a delivery date the moment money is taken, not when the parcel
+          // moves — "arriving by" on an unshipped order is the first thing anyone
+          // looks for after paying.
+          expectedDeliveryAt: estimateDelivery(),
+        },
+      }),
+      prisma.orderEvent.create({
+        data: { orderId: payment.orderId, label: "Payment confirmed" },
       }),
     ])
     await sendOrderConfirmation(payment.orderId)

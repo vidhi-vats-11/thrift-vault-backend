@@ -9,6 +9,7 @@ import { logger } from "../../lib/logger.js"
 import { storeImage } from "../../lib/storage.js"
 import { productInclude, serializeProduct } from "../catalog/product.serializer.js"
 import { serializeOrder } from "../order/order.service.js"
+import * as orderService from "../order/order.service.js"
 import * as returnService from "../order/return.service.js"
 
 const router = Router()
@@ -167,7 +168,10 @@ router.get(
         items: { include: { product: { include: { images: true } } } },
         payments: true,
         address: true,
-        user: { select: { id: true, email: true, name: true } },
+        events: { orderBy: { createdAt: "desc" } },
+        // Phone and gender come through so the fulfilment screen can show who to
+        // call, not just who paid.
+        user: { select: { id: true, email: true, name: true, phone: true, gender: true } },
       },
       orderBy: { createdAt: "desc" },
     })
@@ -185,7 +189,45 @@ router.patch(
     // tracking timeline the Orders page renders.
     body: z.object({
       status: z.enum(["paid", "shipped", "delivered", "cancelled", "fulfilled"]),
+      location: z.string().max(120).optional(),
+      note: z.string().max(200).optional(),
     }),
+  }),
+  asyncHandler(async (req, res) => {
+    // Delegated so status, milestone timestamps and the tracking line are written
+    // together — see setOrderStatus for why those must not drift apart.
+    const updated = await orderService.setOrderStatus(req.params.id, req.body.status, {
+      location: req.body.location,
+      note: req.body.note,
+    })
+    res.json(serializeOrder(updated))
+  })
+)
+
+// A tracking checkpoint that does not change the status — the parcel is still
+// "shipped", it has just reached somewhere worth telling the customer about.
+router.post(
+  "/orders/:id/events",
+  validate({
+    params: idParam,
+    body: z.object({
+      label: z.string().min(1).max(120),
+      location: z.string().max(120).optional(),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const updated = await orderService.addOrderEvent(req.params.id, req.body)
+    res.json(serializeOrder(updated))
+  })
+)
+
+// Sets or corrects the delivery promise by hand, for when a parcel is running
+// late and the customer deserves a truthful date rather than the default guess.
+router.patch(
+  "/orders/:id/eta",
+  validate({
+    params: idParam,
+    body: z.object({ expectedDeliveryAt: z.string().datetime().nullable() }),
   }),
   asyncHandler(async (req, res) => {
     const order = await prisma.order.findUnique({ where: { id: req.params.id } })
@@ -193,11 +235,16 @@ router.patch(
 
     const updated = await prisma.order.update({
       where: { id: req.params.id },
-      data: { status: req.body.status },
+      data: {
+        expectedDeliveryAt: req.body.expectedDeliveryAt
+          ? new Date(req.body.expectedDeliveryAt)
+          : null,
+      },
       include: {
         items: { include: { product: { include: { images: true } } } },
         payments: true,
         address: true,
+        events: { orderBy: { createdAt: "desc" } },
       },
     })
     res.json(serializeOrder(updated))
