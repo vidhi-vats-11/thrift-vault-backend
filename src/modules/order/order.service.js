@@ -246,10 +246,22 @@ export const listOrders = async (userId) => {
 
 // Returns stock to the catalog for a cancelled/expired order. Safe to call once per order;
 // the status guard inside the transaction keeps a double call from inflating stock.
-export const releaseOrder = async (orderId, reason) => {
+/**
+ * Returns an order's stock to the catalogue and marks it cancelled.
+ *
+ * `allowedStatuses` defaults to pending_payment only, and that default is load-
+ * bearing: jobs/releaseExpiredOrders.js sweeps on a timer, and if it could touch
+ * paid orders it would quietly cancel real purchases. Only the explicit user-cancel
+ * path widens it. Safe to call twice — the status guard inside the transaction is
+ * what stops a double call from inflating stock.
+ *
+ * Deliberately does NOT refund. Money is handled by the caller (cancelOrder), so
+ * the timer-driven sweep can never trigger a payment operation.
+ */
+export const releaseOrder = async (orderId, reason, allowedStatuses = ["pending_payment"]) => {
   return prisma.$transaction(async (tx) => {
     const order = await tx.order.findUnique({ where: { id: orderId }, include: { items: true } })
-    if (!order || order.status !== "pending_payment") return null
+    if (!order || !allowedStatuses.includes(order.status)) return null
 
     for (const item of order.items) {
       await tx.product.update({
@@ -267,7 +279,13 @@ export const releaseOrder = async (orderId, reason) => {
       data: { status: "cancelled" },
     })
 
-    logger.info("order_released", { orderId, reason })
+    // Written in the same transaction as the status change so the customer's
+    // tracking history can never disagree with the order's actual state.
+    await tx.orderEvent.create({
+      data: { orderId, label: EVENT_LABELS.cancelled },
+    })
+
+    logger.info("order_released", { orderId, reason, fromStatus: order.status })
     return cancelled
   })
 }
@@ -331,12 +349,48 @@ export const addOrderEvent = async (orderId, { label, location }) => {
   return prisma.order.findUnique({ where: { id: orderId }, include: orderInclude })
 }
 
+// A shopper can call the order off right up until it physically leaves us. Once it
+// is shipped the garment is in transit, so undoing the sale is a return — a
+// different flow, with a different conversation about who pays the postage.
+export const CANCELLABLE_STATUSES = ["pending_payment", "paid"]
+
 export const cancelOrder = async (userId, orderId) => {
   const order = await prisma.order.findFirst({ where: { id: orderId, userId } })
   if (!order) throw ApiError.notFound("Order not found")
-  if (order.status !== "pending_payment") {
+
+  if (!CANCELLABLE_STATUSES.includes(order.status)) {
+    // Say what to do instead, rather than just refusing — "cannot cancel" with no
+    // alternative is how a shopper ends up emailing support.
+    if (order.status === "shipped" || order.status === "delivered" || order.status === "fulfilled") {
+      throw ApiError.conflict(
+        "This order has already been dispatched, so it can't be cancelled — request a return or exchange on the item instead."
+      )
+    }
+    if (order.status === "cancelled") {
+      throw ApiError.conflict("This order is already cancelled.")
+    }
     throw ApiError.conflict(`Cannot cancel an order in status "${order.status}"`)
   }
-  await releaseOrder(orderId, "cancelled_by_user")
+
+  // Money first, stock second. If the restock failed after a refund the shopper is
+  // whole and we have a visible stuck order; the reverse would take their money and
+  // hand the piece to someone else. Mirrors the admin refund route's ordering.
+  const captured = await prisma.payment.findFirst({
+    where: { orderId, status: "captured" },
+  })
+  if (captured) {
+    await gateway.refund({
+      gatewayRef: captured.gatewayRef,
+      amountCents: captured.amountCents,
+    })
+    await prisma.payment.update({ where: { id: captured.id }, data: { status: "refunded" } })
+    logger.info("order_refunded_on_cancel", {
+      orderId,
+      gatewayRef: captured.gatewayRef,
+      amountCents: captured.amountCents,
+    })
+  }
+
+  await releaseOrder(orderId, "cancelled_by_user", CANCELLABLE_STATUSES)
   return getOrder(userId, orderId)
 }
