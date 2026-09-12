@@ -1,0 +1,65 @@
+# fly.toml — Thrift Vault API
+# Deploy unit is the Dockerfile in this directory.
+#   fly launch --no-deploy --copy-config   (first time, creates the app)
+#   fly secrets set ...                    (see .env.example for the full list)
+#   fly deploy
+
+app = "thrift-vault-api"
+primary_region = "bom"   # Mumbai — closest region to the users.
+
+[build]
+  dockerfile = "Dockerfile"
+
+[deploy]
+  # Runs in a one-off machine built from the new image, before any new machine
+  # takes traffic. If it exits non-zero the deploy is aborted, so a bad
+  # migration never reaches a live machine.
+  #
+  # It needs DATABASE_URL *and* DATABASE_URL_UNPOOLED: prisma/schema.prisma
+  # declares `directUrl = env("DATABASE_URL_UNPOOLED")` and migrate uses the
+  # direct (non-pooled) connection. Fly secrets are injected into the release
+  # machine, so setting both as secrets is sufficient.
+  #
+  # `prisma` is a production dependency, so this resolves from node_modules
+  # rather than downloading the CLI at deploy time.
+  release_command = "npx --no-install prisma migrate deploy"
+  strategy = "rolling"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "4000"
+  # Product images go to Vercel Blob (see lib/storage.js); this path is only the
+  # fallback and lives on the machine's ephemeral disk.
+  UPLOAD_DIR = "/app/uploads"
+
+[http_service]
+  internal_port = 4000          # matches PORT / server.js
+  force_https = true
+  auto_start_machines = true
+  # Deliberately NOT stopping idle machines: server.js starts an in-process
+  # order sweeper on a 60s timer (jobs/releaseExpiredOrders.js) that releases
+  # stock held by abandoned checkouts. A stopped machine runs no timer, and the
+  # Vercel cron that used to cover that case is gone.
+  auto_stop_machines = "off"
+  min_machines_running = 1
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 200
+    hard_limit = 250
+
+  # Real endpoint: app.js registers GET /health -> { status, uptime }.
+  # It is outside the /api/v1 router and needs no auth.
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    method = "GET"
+    timeout = "5s"
+    path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1

@@ -1,5 +1,10 @@
 generator client {
   provider = "prisma-client-js"
+  // "native" keeps local dev (macOS / glibc Linux) working. The musl target is
+  // the one the Fly image needs: node:20-alpine is Alpine with OpenSSL 3, and a
+  // client generated only for the host would ship an engine the container
+  // cannot load ("Query engine library for current platform not found").
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {

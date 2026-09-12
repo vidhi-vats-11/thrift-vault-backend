@@ -1,8 +1,25 @@
 node_modules
 npm-debug.log
+*.log
+
+# Secrets never belong in a layer. Also covers .env.example / .env.local.
 .env
-.env.*
-uploads
+.env*
+
 .git
+.gitignore
+.github
+
+# Ephemeral local image storage — never ship its contents.
+uploads
+
+# Docs / tooling that the running server does not need.
 *.md
+TECHDOC.pdf
 postman
+docker-compose.yml
+Dockerfile
+.dockerignore
+fly.toml
+.vercel
+.DS_Store
