@@ -1,0 +1,54 @@
+# render.yaml — Thrift Vault API on Render (Docker)
+#
+# Render builds the Dockerfile in this directory; nothing here duplicates it.
+# Create the service with:  Render Dashboard > New > Blueprint > pick this repo.
+#
+# The database is deliberately NOT defined here. Render's free Postgres is
+# deleted after 30 days, which would silently take real orders with it. The DB
+# lives on Neon instead (free, no expiry) and is passed in as DATABASE_URL.
+
+services:
+  - type: web
+    name: thrift-vault-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    region: singapore # closest free region to India
+    healthCheckPath: /health # real endpoint in src/app.js -> { status, uptime }
+
+    # Render's free plan has no preDeployCommand, so migrations run at start-up
+    # instead. `migrate deploy` is idempotent — on an up-to-date database it is a
+    # sub-second no-op — and if it fails the container refuses to start rather
+    # than serving traffic against a half-migrated schema.
+    dockerCommand: sh -c "npx --no-install prisma migrate deploy && node src/server.js"
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 4000
+      - key: UPLOAD_DIR
+        value: /app/uploads
+
+      # --- set in the Render dashboard, never committed ---------------------
+      # Neon pooled connection.
+      - key: DATABASE_URL
+        sync: false
+      # Neon direct (non-pooled) connection. schema.prisma declares this as
+      # directUrl; `migrate deploy` above fails without it.
+      - key: DATABASE_URL_UNPOOLED
+        sync: false
+      - key: JWT_ACCESS_SECRET
+        sync: false
+      - key: JWT_REFRESH_SECRET
+        sync: false
+      # Comma-separated. Must list the storefront origin or the browser blocks
+      # every API call while the site still loads perfectly.
+      - key: CORS_ORIGINS
+        sync: false
+      # Without this, image uploads silently fall back to the container's
+      # ephemeral disk and are wiped on every deploy.
+      - key: BLOB_READ_WRITE_TOKEN
+        sync: false
+      - key: PAYMENT_WEBHOOK_SECRET
+        sync: false
