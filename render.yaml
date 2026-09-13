@@ -13,7 +13,12 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     plan: free
-    region: singapore # closest free region to India
+    # Co-located with the Neon database in us-east-1. Do NOT move this closer to
+    # the users: checkout holds a transaction open across many sequential queries,
+    # so server-to-database latency is multiplied by the query count, while
+    # user-to-server latency is paid once. Running this in Singapore against a
+    # us-east-1 database made every checkout exceed the transaction timeout.
+    region: virginia
     healthCheckPath: /health # real endpoint in src/app.js -> { status, uptime }
 
     # No dockerCommand override on purpose. Render runs the container command in

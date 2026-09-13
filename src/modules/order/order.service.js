@@ -199,6 +199,17 @@ export const createOrder = async ({ userId, addressId, idempotencyKey }) => {
 
     await tx.cartItem.deleteMany({ where: { userId } })
     return created
+  }, {
+    // Prisma's default interactive-transaction timeout is 5s. This block holds
+    // FOR UPDATE locks across a cart-sized number of sequential round trips, so
+    // the budget is really 5s minus (queries x network latency). When the app
+    // server and the database sit in different regions that arithmetic stops
+    // working and checkout fails with "Transaction already closed" — which is
+    // exactly what happened when this ran in Singapore against a us-east-1
+    // database. The real fix is co-locating the two; this is the safety net for
+    // a slow moment, not a substitute for it.
+    timeout: 20000,
+    maxWait: 10000,
   })
 
   const intent = await gateway.createPaymentIntent({
