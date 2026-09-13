@@ -42,6 +42,19 @@ export const createApp = () => {
 
   app.get("/health", (_req, res) => res.json({ status: "ok", uptime: process.uptime() }))
 
+  // Opening the API's root in a browser is a natural thing to do, and a bare 404
+  // there reads as "the backend is broken" when it is working perfectly. Say what
+  // this service is and where the real routes live instead.
+  app.get("/", (_req, res) =>
+    res.json({
+      service: "thrift-vault-api",
+      status: "ok",
+      message: "This is the Thrift Vault API, not the shop. Visit the storefront to browse.",
+      storefront: "https://thriftvaultstore.vercel.app",
+      endpoints: { health: "/health", api: "/api/v1" },
+    })
+  )
+
   const v1 = express.Router()
   v1.use("/auth", authRoutes)
   v1.use("/", catalogRoutes)
