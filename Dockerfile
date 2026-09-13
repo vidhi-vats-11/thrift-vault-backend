@@ -47,6 +47,8 @@ COPY --from=deps --chown=node:node /app/node_modules ./node_modules
 COPY --chown=node:node package.json package-lock.json ./
 COPY --chown=node:node prisma ./prisma
 COPY --chown=node:node src ./src
+COPY --chown=node:node docker-entrypoint.sh ./
+RUN chmod +x ./docker-entrypoint.sh
 
 # Only used when BLOB_READ_WRITE_TOKEN is unset (local-disk image fallback).
 # On Fly this filesystem is ephemeral — see fly.toml / .env.example.
@@ -55,4 +57,6 @@ RUN mkdir -p /app/uploads && chown node:node /app/uploads
 USER node
 
 EXPOSE 4000
-CMD ["node", "src/server.js"]
+# Runs migrations, then execs the server. See docker-entrypoint.sh for why this
+# is a script and not a chained command.
+CMD ["./docker-entrypoint.sh"]

@@ -16,11 +16,13 @@ services:
     region: singapore # closest free region to India
     healthCheckPath: /health # real endpoint in src/app.js -> { status, uptime }
 
-    # Render's free plan has no preDeployCommand, so migrations run at start-up
-    # instead. `migrate deploy` is idempotent — on an up-to-date database it is a
-    # sub-second no-op — and if it fails the container refuses to start rather
-    # than serving traffic against a half-migrated schema.
-    dockerCommand: sh -c "npx --no-install prisma migrate deploy && node src/server.js"
+    # No dockerCommand override on purpose. Render runs the container command in
+    # exec form, without a shell, so `migrate && node` would pass `&&` to prisma
+    # as an argument and the container would exit as soon as migrations finished.
+    # The Dockerfile's CMD runs docker-entrypoint.sh, which does both properly.
+    #
+    # (Migrations run at start-up rather than via preDeployCommand because the
+    # free plan does not offer one. `migrate deploy` is idempotent.)
 
     envVars:
       - key: NODE_ENV
