@@ -1,0 +1,30 @@
+# Keeps the Render free-tier service from sleeping.
+#
+# A free Render web service spins down after ~15 minutes with no traffic, and the
+# next visitor then waits 20-60s for a cold start — long enough that the storefront
+# gives up and shows a "can't reach the server" error. Pinging /health every 10
+# minutes keeps the machine warm.
+#
+# Free plan budget: 750 instance-hours/month, and a month of continuous uptime is
+# ~744 hours, so staying awake fits — but only just. Running a second free service
+# in this account would push it over and both would be suspended.
+#
+# GitHub disables scheduled workflows on public repos after 60 days without
+# activity, so if cold starts return, check that this workflow is still enabled.
+
+name: keep-alive
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: # lets you wake the service by hand from the Actions tab
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping /health
+        # --max-time 120 because a cold start is slow by definition: the first ping
+        # after a sleep is exactly the request that takes the longest.
+        # -f so an HTTP error actually fails the job instead of passing silently.
+        run: curl -fsS --max-time 120 https://thriftvault-api.onrender.com/health
