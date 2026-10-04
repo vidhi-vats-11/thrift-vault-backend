@@ -36,11 +36,20 @@
  */
 
 import { randomUUID } from "node:crypto"
+import { readFileSync, existsSync } from "node:fs"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
 import bcrypt from "bcryptjs"
 import { PrismaClient } from "@prisma/client"
 import { PRODUCTS, REVIEW_CONTENT } from "./seedData.js"
 
 const prisma = new PrismaClient()
+
+// Optional bank of extra photographs per archetype, built by fetchPhotos.js.
+// Without it every variant falls back to its archetype's single curated shot,
+// which works but repeats the same picture across ~33 listings.
+const POOL_PATH = join(dirname(fileURLToPath(import.meta.url)), "photoPool.json")
+const PHOTO_POOL = existsSync(POOL_PATH) ? JSON.parse(readFileSync(POOL_PATH, "utf8")) : {}
 
 const SCALE = Number(process.env.SCALE ?? 1)
 const RESET = process.argv.includes("--reset")
@@ -353,7 +362,29 @@ const resetGenerated = async () => {
   await prisma.user.deleteMany({ where: { id: { in: userIds } } })
 
   // Generated products: images and sizes cascade, reviews cascade.
-  const deleted = await prisma.product.deleteMany({ where: { name: { notIn: CURATED_NAMES } } })
+  //
+  // Anything a *surviving* order still points at has to stay, or the delete
+  // trips order_items_product_id_fkey. That happens as soon as someone places a
+  // real order against a generated listing — browsing the local store and
+  // checking out is enough. Those listings are left behind rather than taking
+  // the order with them: a stray product is harmless, deleting someone's order
+  // is not.
+  const stillReferenced = await prisma.orderItem.findMany({
+    distinct: ["productId"],
+    select: { productId: true },
+  })
+  const keepIds = stillReferenced.map((i) => i.productId)
+
+  const deleted = await prisma.product.deleteMany({
+    where: { name: { notIn: CURATED_NAMES }, id: { notIn: keepIds } },
+  })
+
+  const orphaned = await prisma.product.count({ where: { name: { notIn: CURATED_NAMES } } })
+  if (orphaned > 0) {
+    console.warn(
+      `  kept ${orphaned} generated listing(s) still attached to an order placed outside this seeder`
+    )
+  }
   await prisma.newsletterSubscriber.deleteMany({ where: { email: { endsWith: "@vault-demo.test" } } })
 
   console.log(`reset: removed ${orderIds.length} orders, ${userIds.length} users, ${deleted.count} products`)
@@ -380,6 +411,9 @@ const loadArchetypes = async () => {
   return usable.map((r) => ({
     core: r.name,
     photo: r.images[0].url,
+    // Extra shots of this same garment type. Each variant takes a different one,
+    // so the name-matches-photo guarantee survives while the repetition goes.
+    photos: PHOTO_POOL[r.name] ?? [],
     categoryId: r.categoryId,
     categoryName: r.category.name,
     basePrice: r.priceCents / 100,
@@ -451,10 +485,22 @@ const buildProducts = (archetypes, count, taken) => {
     )
   }
 
+  // How many variants each archetype has produced so far, so successive variants
+  // walk through its photo bank rather than all taking the first entry.
+  const variantSeq = new Map()
+
   const products = []
   for (const named of candidates.slice(0, count)) {
     const archetype = archetypes[named.archetypeIndex]
     taken.add(named.name)
+
+    const seq = variantSeq.get(named.archetypeIndex) ?? 0
+    variantSeq.set(named.archetypeIndex, seq + 1)
+
+    // Walk the bank in order. Modulo rather than random so reuse only starts
+    // once every photo has been used once, and then stays evenly spread.
+    const banked = archetype.photos.length > 0 ? archetype.photos[seq % archetype.photos.length] : null
+    const photo = banked?.url ?? archetype.photo
 
     const condition = weightedCondition()
     const price = prettyPrice(archetype.basePrice * condition.multiplier * (0.78 + rand() * 0.5))
@@ -473,14 +519,19 @@ const buildProducts = (archetypes, count, taken) => {
       tag: pick(TAGS),
       description: archetype.description,
       highlights: archetype.highlights,
-      details: archetype.details,
+      // Unsplash's terms require crediting the photographer wherever the photo
+      // appears. The spec table is already rendered on the product page, so the
+      // credit rides along there rather than needing a new column.
+      details: banked?.credit?.name
+        ? [...archetype.details, { label: "Photograph", value: `${banked.credit.name} / Unsplash` }]
+        : archetype.details,
       flaws: condition.flaws,
       // Stock and status are set later, from the order that consumes it.
       stockQuantity: 1,
       status: "live",
       createdAt: between(400, 1),
       // Carried for the image/size rows and never written to Product.
-      _photo: archetype.photo,
+      _photo: photo,
       // Decided here rather than at insert time, because order lines and cart
       // lines pick from this list — choosing again later would let an order
       // reference a size the product does not actually stock. One-of-one pieces
@@ -928,6 +979,23 @@ const main = async () => {
     generated.flatMap((p) => p._sizes.map((size) => ({ id: randomUUID(), productId: p.id, size })))
   )
   console.log(`products: ${generated.length} (${soldPool.length} for the order book, ${livePool.length} live)`)
+
+  // Photo variety is the thing most likely to quietly regress, so state it.
+  const distinctPhotos = new Set(generated.map((p) => p._photo)).size
+  const worst = Math.max(
+    ...Object.values(
+      generated.reduce((acc, p) => ((acc[p._photo] = (acc[p._photo] ?? 0) + 1), acc), {})
+    )
+  )
+  const banked = Object.values(PHOTO_POOL).reduce((n, v) => n + v.length, 0)
+  console.log(
+    `photos: ${distinctPhotos} distinct across ${generated.length} listings ` +
+      `(most-reused appears ${worst}x)` +
+      (banked === 0
+        ? "\n  note: no photoPool.json — run `node prisma/fetchPhotos.js` with an" +
+          " UNSPLASH_ACCESS_KEY to give each listing its own photograph"
+        : ` — ${banked} banked from Unsplash`)
+  )
 
   // --- people ------------------------------------------------------------------
   // One bcrypt hash shared across accounts: cost 12 is deliberately slow, and
