@@ -11,7 +11,10 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
     "seed": "node prisma/seed.js",
-    "seed:restock": "RESTOCK=1 node prisma/seed.js"
+    "seed:restock": "RESTOCK=1 node prisma/seed.js",
+    "seed:bulk": "node prisma/seedBulk.js",
+    "seed:bulk:reset": "node prisma/seedBulk.js --reset",
+    "seed:bulk:verify": "psql \"$DATABASE_URL\" -f prisma/verifyBulk.sql"
   },
   "prisma": {
     "seed": "node prisma/seed.js"
