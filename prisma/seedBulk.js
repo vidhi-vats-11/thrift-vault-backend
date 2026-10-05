@@ -501,6 +501,8 @@ const buildProducts = (archetypes, count, taken) => {
     // once every photo has been used once, and then stays evenly spread.
     const banked = archetype.photos.length > 0 ? archetype.photos[seq % archetype.photos.length] : null
     const photo = banked?.url ?? archetype.photo
+    const creditLine =
+      banked?.credit?.label ?? (banked?.credit?.name ? `${banked.credit.name} / Unsplash` : null)
 
     const condition = weightedCondition()
     const price = prettyPrice(archetype.basePrice * condition.multiplier * (0.78 + rand() * 0.5))
@@ -522,8 +524,11 @@ const buildProducts = (archetypes, count, taken) => {
       // Unsplash's terms require crediting the photographer wherever the photo
       // appears. The spec table is already rendered on the product page, so the
       // credit rides along there rather than needing a new column.
-      details: banked?.credit?.name
-        ? [...archetype.details, { label: "Photograph", value: `${banked.credit.name} / Unsplash` }]
+      // Openverse pools carry a ready-made label (creator + licence); the
+      // Unsplash pool carries just a name. Either way the photographer is
+      // credited, which both services' terms require.
+      details: creditLine
+        ? [...archetype.details, { label: "Photograph", value: creditLine }]
         : archetype.details,
       flaws: condition.flaws,
       // Stock and status are set later, from the order that consumes it.
