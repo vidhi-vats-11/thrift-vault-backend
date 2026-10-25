@@ -5,9 +5,14 @@
 # gives up and shows a "can't reach the server" error. Pinging /health every 10
 # minutes keeps the machine warm.
 #
-# Free plan budget: 750 instance-hours/month, and a month of continuous uptime is
-# ~744 hours, so staying awake fits — but only just. Running a second free service
-# in this account would push it over and both would be suspended.
+# Free plan budget: 750 instance-hours/month, shared by every free service in the
+# workspace. Pinging around the clock used ~744 of them, so as soon as a second free
+# service (tribal-heritage-archive-api) ran too, the budget ran out and Render
+# suspended this API until the next billing period (October 2026).
+#
+# So pings only run 02:00-18:59 UTC (07:30-00:29 IST): about 17 h/day, roughly
+# 530 h/month. Overnight the service sleeps, and the first visitor of the morning
+# waits for a cold start — an acceptable trade for never being suspended again.
 #
 # GitHub disables scheduled workflows on public repos after 60 days without
 # activity, so if cold starts return, check that this workflow is still enabled.
@@ -16,7 +21,7 @@ name: keep-alive
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "*/10 2-18 * * *" # UTC; see the budget note above
   workflow_dispatch: # lets you wake the service by hand from the Actions tab
 
 jobs:
